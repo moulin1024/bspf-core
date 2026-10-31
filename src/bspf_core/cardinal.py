@@ -112,7 +112,8 @@ class CardinalLine:
 
 
 def cardinal_line(x, *, degree=5, n_basis=None, knots=None, order=None, jets=None,
-                  regularization=0.0, convention="samples", max_derivative=4, clustering=0.0):
+                  regularization=0.0, convention="samples", max_derivative=4, clustering=0.0,
+                  symmetrize=False):
     """Build a :class:`CardinalLine` on a uniform grid.
 
     Parameters
@@ -140,6 +141,12 @@ def cardinal_line(x, *, degree=5, n_basis=None, knots=None, order=None, jets=Non
         Highest derivative tabulated for :func:`derivatives`. Default 4.
     clustering : float, optional
         Knot clustering passed to :func:`bspf_core.splines.clamped_knots`.
+    symmetrize : bool, optional
+        Average ``P`` with its mirror image, ``(P + P[::-1, ::-1]) / 2``. The
+        exact ``P`` of a mirror-symmetric setup (symmetric knots, jets that
+        are reflections of each other) has this symmetry; averaging removes
+        the rounding that breaks it, as the hand-off "reflection-balanced"
+        lines do. Default False.
 
     Returns
     -------
@@ -170,6 +177,10 @@ def cardinal_line(x, *, degree=5, n_basis=None, knots=None, order=None, jets=Non
     derivatives up to order ``q - 1`` and scale like ``h^{1-q}``; a direct KKT
     solve then loses several digits in ``P``, whose gain is large, so the
     QR form is used.
+
+    A clamped spline's end values are its first and last coefficients, so
+    the first and last rows of ``P`` equal the jet rows for order 0 exactly;
+    they are set exactly rather than left to rounding.
 
     Examples
     --------
@@ -206,6 +217,14 @@ def cardinal_line(x, *, degree=5, n_basis=None, knots=None, order=None, jets=Non
         P = _constrained_projection(basis[0], C, J, weights, regularization)
     except (la.LinAlgError, ValueError) as exc:
         raise ValueError("singular constrained fit; use fewer basis functions or regularization > 0") from exc
+    if symmetrize:
+        mirror = J[:q, ::-1] * (-1.0) ** np.arange(q)[:, None]
+        if not (np.allclose(knots + knots[::-1], x[0] + x[-1], rtol=0, atol=1e-13 * (x[-1] - x[0]))
+                and np.allclose(J[q:], mirror, rtol=0, atol=1e-12 * max(1.0, np.max(abs(J))))):
+            raise ValueError("symmetrize needs symmetric knots and mirror-symmetric jets")
+        P = 0.5 * (P + P[::-1, ::-1])
+    if q and knots[degree] == x[0] and knots[-degree - 1] == x[-1]:
+        P[0], P[-1] = J[0], J[q]                               # clamped end values are exact
     count = len(x) if convention == "samples" else len(x) - 1
     omega = 2 * np.pi * np.fft.fftfreq(count, d=h)
     return CardinalLine(jnp.asarray(x), jnp.asarray(knots), jnp.asarray(P),
@@ -226,6 +245,8 @@ def _constrained_projection(B, C, J, weights, regularization):
         T = Q[:, :r] @ la.solve_triangular(R[:r, :r].T, np.diag(scale), lower=True)
     else:
         Z, T = np.eye(nb), np.zeros((nb, 0))
+    if Z.shape[1] == 0:                                        # n_basis == 2q: the jets fix the spline
+        return T @ J
     root = np.sqrt(weights)
     design = root[:, None] * (B @ Z)
     if regularization:
@@ -314,23 +335,38 @@ def derivatives(line, f, orders=(1, 2)):
     return {k: _contract(line.basis[k], c) + _fourier_derivative(line, r, k) for k in orders}
 
 
-def _host_dft_rows(line, points, derivative):
-    """Trigonometric interpolation rows: points -> values from remainder samples."""
+def _trig_rows(line, points, derivative=0, primitive=False):
+    """Rows mapping samples to the trigonometric interpolant (real-data semantics).
+
+    Returns shape ``(len(points), N)``; for the closed convention the last
+    column is zero because the last sample is not part of the FFT. With
+    ``primitive=True`` the rows give :math:`\\int_{x_0}^{z}` of the interpolant.
+    """
     x = np.asarray(line.x)
     omega = np.asarray(line.omega)
     count = len(omega)
-    modes = np.exp(1j * (np.asarray(points)[:, None] - x[0]) * omega[None, :]) * (1j * omega[None, :]) ** derivative
+    u = np.asarray(points)[:, None] - x[0]
+    if primitive:
+        safe = np.where(omega == 0, 1.0, omega)
+        modes = np.where(omega == 0, u + 0j, np.expm1(1j * u * omega) / (1j * safe))
+    else:
+        modes = np.exp(1j * u * omega) * (1j * omega) ** derivative
     dft = np.exp(-2j * np.pi * np.outer(np.arange(count), np.arange(count)) / count)
-    return (modes @ dft) / count                       # (points, count)
+    rows = ((modes @ dft) / count).real
+    return np.pad(rows, ((0, 0), (0, line.size - count)))
 
 
-def _remainder_map(line):
-    """Matrix mapping samples to remainder samples used by the FFT."""
-    R = np.eye(line.size) - np.asarray(line.basis[0]) @ np.asarray(line.projection)
-    return R[:-1] if line.convention == "closed" else R
+def _remainder_factor(line, points, derivative=0, primitive=False, factors=None):
+    """``G = spline basis - trig(spline basis samples)`` at points, shape (len(points), n_basis)."""
+    if factors is not None:
+        return factors.evaluate(points, derivative, primitive)
+    knots = np.asarray(line.knots)
+    spline = (splines.primitive_matrix(knots, line.degree, points) if primitive
+              else splines.basis_matrix(knots, line.degree, points, derivative))
+    return spline - _trig_rows(line, points, derivative, primitive) @ np.asarray(line.basis[0])
 
 
-def evaluation_matrix(line, points, derivative=0):
+def evaluation_matrix(line, points, derivative=0, factors=None):
     """Cardinal functions (or derivatives) at arbitrary points, for real data.
 
     Parameters
@@ -340,6 +376,9 @@ def evaluation_matrix(line, points, derivative=0):
         Points in ``[x[0], x[-1]]``.
     derivative : int, optional
         Derivative order. Default 0.
+    factors : RemainderFactors, optional
+        Extended-precision remainder factors of ``line``. Without them the
+        factors are formed in float64 (see Notes).
 
     Returns
     -------
@@ -349,13 +388,49 @@ def evaluation_matrix(line, points, derivative=0):
 
     Notes
     -----
+    The reconstruction is written as
+
+    .. math::
+
+        \\operatorname{recon}(f)(z) = \\operatorname{trig}(f)(z) + G(z)\\, P f,
+        \\qquad G(z) = B(z) - \\operatorname{trig}(B)(z),
+
+    the trigonometric interpolant of the samples plus the interpolation error
+    of each spline function, weighted by the fit. ``G`` is small while ``P``
+    has a large gain for high constrained orders, so float64 rounding in
+    ``G`` (absolute error about ``1e-16``) is amplified by ``|P|``. For such
+    lines pass :class:`RemainderFactors`, which forms ``G`` in extended
+    precision and rounds it once, as the hand-off quad-precision factors do.
+
     This is how a cardinal BSPF line becomes a Galerkin basis: evaluate the
     cardinal functions at quadrature points. Complex data should be split
     into real and imaginary parts.
     """
     points = np.atleast_1d(np.asarray(points, dtype=float))
-    spline = splines.basis_matrix(np.asarray(line.knots), line.degree, points, derivative) @ np.asarray(line.projection)
-    return spline + (_host_dft_rows(line, points, derivative) @ _remainder_map(line)).real
+    G = _remainder_factor(line, points, derivative, factors=factors)
+    return _trig_rows(line, points, derivative) + G @ np.asarray(line.projection)
+
+
+def primitive_matrix(line, points, factors=None):
+    """Primitives :math:`\\int_{x_0}^{z} \\phi_j` of the cardinal functions (real data).
+
+    Parameters
+    ----------
+    line : CardinalLine
+    points : array_like, shape (M,)
+        Upper limits ``z`` in ``[x[0], x[-1]]``.
+    factors : RemainderFactors, optional
+        As in :func:`evaluation_matrix`.
+
+    Returns
+    -------
+    ndarray, shape (M, N)
+        ``primitive_matrix(line, z) @ f`` is the integral of the reconstruction
+        of ``f`` from the left end to ``z``.
+    """
+    points = np.atleast_1d(np.asarray(points, dtype=float))
+    G = _remainder_factor(line, points, primitive=True, factors=factors)
+    return _trig_rows(line, points, primitive=True) + G @ np.asarray(line.projection)
 
 
 def differentiation_matrix(line, order=1):
@@ -367,7 +442,7 @@ def differentiation_matrix(line, order=1):
     return np.asarray(derivatives(line, jnp.eye(line.size), orders=(order,))[order])
 
 
-def integration_weights(line, a=None, b=None):
+def integration_weights(line, a=None, b=None, factors=None):
     """Quadrature weights of the BSPF reconstruction over ``[a, b]`` (real data).
 
     Parameters
@@ -375,26 +450,126 @@ def integration_weights(line, a=None, b=None):
     line : CardinalLine
     a, b : float, optional
         Bounds inside ``[x[0], x[-1]]``; default the whole interval.
+    factors : RemainderFactors, optional
+        As in :func:`evaluation_matrix`.
 
     Returns
     -------
     ndarray, shape (N,)
-        ``w @ f`` is the exact integral of the reconstruction of ``f``.
-
-    Notes
-    -----
-    The spline part uses the exact spline primitive; the remainder uses
-    :math:`\\int_a^b e^{i\\omega (x - x_0)} dx = L\\, e^{i\\omega (m - x_0)}
-    \\operatorname{sinc}(\\omega L / 2\\pi)` with ``L = b - a`` and midpoint ``m``.
+        ``w @ f`` is the exact integral of the reconstruction of ``f``; the
+        difference of two rows of :func:`primitive_matrix`.
     """
     x = np.asarray(line.x)
     a = x[0] if a is None else float(a)
     b = x[-1] if b is None else float(b)
-    ends = splines.primitive_matrix(np.asarray(line.knots), line.degree, [a, b])
-    spline = (ends[1] - ends[0]) @ np.asarray(line.projection)
-    omega = np.asarray(line.omega)
-    count = len(omega)
-    L = b - a
-    kernel = L * np.exp(1j * omega * ((a + b) / 2 - x[0])) * np.sinc(omega * L / (2 * np.pi))
-    dft = np.exp(-2j * np.pi * np.outer(np.arange(count), np.arange(count)) / count)
-    return spline + ((kernel @ dft) / count @ _remainder_map(line)).real
+    ends = primitive_matrix(line, [a, b], factors)
+    return ends[1] - ends[0]
+
+
+class RemainderFactors:
+    """Spline interpolation errors ``G = B - trig(B)`` in extended precision.
+
+    Setup computes the Fourier coefficients of the sampled spline basis with
+    ``mpmath`` at ``digits`` significant digits; :meth:`evaluate` forms ``G``,
+    its derivatives or its primitive at points and rounds the result to
+    float64 once. Pass the object as ``factors=`` to :func:`evaluation_matrix`,
+    :func:`primitive_matrix` and :func:`integration_weights`.
+
+    Parameters
+    ----------
+    line : CardinalLine
+    digits : int, optional
+        Working precision in decimal digits. The default 34 matches IEEE
+        binary128 (``__float128``), the precision of the hand-off factors.
+
+    Notes
+    -----
+    Replaces the hand-off ``quad_basis.c``/``QuadFactors`` (GCC
+    ``libquadmath``), which is fixed to degree 7, ten spline functions and
+    knots at thirds. This version takes any clamped knots, degree and grid,
+    at the cost of pure-Python arithmetic: setup is ``O(count^2 n_basis)`` and
+    each point ``O(count n_basis)`` multiprecision operations. Results are
+    cached per point set.
+
+    Examples
+    --------
+    >>> import jax; jax.config.update("jax_enable_x64", True)
+    >>> x = np.linspace(0.0, 1.0, 17)
+    >>> line = cardinal_line(x, degree=3, n_basis=6, order=2, convention="closed")
+    >>> factors = RemainderFactors(line)
+    >>> z = np.array([0.1, 0.55])
+    >>> bool(np.allclose(evaluation_matrix(line, z, factors=factors), evaluation_matrix(line, z), atol=1e-12))
+    True
+    """
+
+    def __init__(self, line, digits=34):
+        import mpmath
+        self._mp = mpmath.mp.clone()
+        self._mp.dps = int(digits)
+        mp = self._mp
+        self.line = line
+        self.digits = int(digits)
+        x = np.asarray(line.x)
+        self._count = len(line.omega)
+        self._x0 = mp.mpf(float(x[0]))
+        self._h = (mp.mpf(float(x[-1])) - self._x0) / (line.size - 1)
+        self._period = self._count * self._h
+        self._knots = [mp.mpf(float(t)) for t in np.asarray(line.knots)]
+        count, nb = self._count, line.n_basis
+        samples = [splines._mp_basis(mp, self._knots, line.degree, self._x0 + n * self._h) for n in range(count)]
+        roots = [mp.expjpi(-mp.mpf(2 * j) / count) for j in range(count)]
+        self._coefficients = [[sum(samples[n][m] * roots[(k * n) % count] for n in range(count)) / count
+                               for m in range(nb)] for k in range(count // 2 + 1)]
+        self._cache = {}
+
+    def evaluate(self, points, derivative=0, primitive=False):
+        """``G`` (or its derivative, or its primitive from ``x[0]``) at points.
+
+        Parameters
+        ----------
+        points : array_like, shape (M,)
+        derivative : int, optional
+        primitive : bool, optional
+            Return :math:`\\int_{x_0}^{z} G` instead of a derivative.
+
+        Returns
+        -------
+        ndarray, shape (M, n_basis)
+        """
+        points = np.atleast_1d(np.asarray(points, dtype=float))
+        key = points.tobytes()
+        orders = max(2, int(derivative))
+        if key not in self._cache or len(self._cache[key]) - 1 < orders + 1:
+            rows = [self._point(float(z), orders) for z in points]
+            self._cache[key] = [np.array([r[j] for r in rows]) for j in range(orders + 2)]
+        bundle = self._cache[key]
+        return bundle[-1] if primitive else bundle[int(derivative)]
+
+    def _point(self, z, orders):
+        """``[G, G', ..., G^(orders), int G]`` at one point, from one pass over the modes."""
+        mp = self._mp
+        count, K = self._count, self._count // 2
+        u = mp.mpf(z) - self._x0
+        x = self._x0 + u
+        degree = self.line.degree
+        splines_ = [splines._mp_basis(mp, self._knots, degree, x, d) for d in range(orders + 1)]
+        splines_.append(splines._mp_basis(mp, self._knots, degree, x, primitive=True))
+        c0 = [c.real for c in self._coefficients[0]]
+        trig = [list(c0)] + [[mp.zero] * len(c0) for _ in range(orders)] + [[c * u for c in c0]]
+        step = 2 * mp.pi / self._period
+        rotation = mp.expj(step * u)
+        phase = mp.one
+        for k in range(1, K + 1):
+            omega = step * k
+            phase *= rotation                                         # e^{i k step u}; 34 digits absorb the drift
+            nyquist = count % 2 == 0 and k == K                       # real part, counted once
+            weight = 1 if nyquist else 2
+            powers = [weight * omega ** d for d in range(orders + 1)]
+            for m, c in enumerate(self._coefficients[k]):
+                c = mp.mpc(c.real, 0) if nyquist else c
+                cp = c * phase
+                parts = (cp.real, -cp.imag, -cp.real, cp.imag)        # Re(cp * i^d), d mod 4
+                for d in range(orders + 1):
+                    trig[d][m] += powers[d] * parts[d % 4]
+                trig[-1][m] += weight * (cp.imag - c.imag) / omega    # Re(c (e^{i omega u} - 1) / (i omega))
+        return [[float(a - b) for a, b in zip(sp, tr)] for sp, tr in zip(splines_, trig)]

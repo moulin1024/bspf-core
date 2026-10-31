@@ -86,6 +86,65 @@ def taylor_jets(x, order, points, fit="interpolation"):
     return _assemble(left / h ** np.arange(order)[:, None], len(x))
 
 
+def polynomial_jets(x, order, points, degree):
+    """Least-squares polynomial jets with the end value kept exact.
+
+    On each end window of ``points`` samples, fit a polynomial of ``degree``
+    that passes through the end sample and fits the others by least squares,
+    then differentiate it at the end. Rows for orders ``>= 1`` annihilate
+    constants exactly.
+
+    Parameters
+    ----------
+    x : array_like, shape (N,)
+        Uniform grid.
+    order : int
+        Number of derivative orders ``q``.
+    points : int
+        Window size, ``> degree``; clipped to ``N``.
+    degree : int
+        Polynomial degree, ``>= order - 1``.
+
+    Returns
+    -------
+    ndarray, shape (2 * order, N)
+
+    Notes
+    -----
+    The fixed-window schemes ``"fixed{points}d{degree}"`` of the hand-off
+    ``boundary_estimators.build_stencil``; the Navier-Stokes lines use
+    ``points=16, degree=12``. The fit uses Legendre polynomials on the window
+    mapped to [-1, 1] and a QR factorization, as there.
+
+    Examples
+    --------
+    >>> x = np.linspace(0.0, 1.0, 41)
+    >>> J = polynomial_jets(x, order=3, points=16, degree=12)
+    >>> bool(np.allclose(J @ np.exp(x), [1, 1, 1, np.e, np.e, np.e], atol=1e-6))
+    True
+    """
+    x, _ = _uniform_spacing(x)
+    m = min(len(x), int(points))
+    if m <= degree or degree < order - 1:
+        raise ValueError("need points > degree >= order - 1")
+    if order == 0:
+        return np.zeros((0, len(x)))
+    width = x[m - 1] - x[0]
+    z = 2 * (x[:m] - x[0]) / width - 1
+    A = np.polynomial.legendre.legvander(z, degree)
+    A = A[1:, 1:] - A[0, 1:]                     # exact end value: fit f - f_0 by P - P(-1)
+    Q, R = la.qr(A, mode="economic")
+    inverse = la.solve_triangular(R, Q.T)
+    left = np.zeros((order, m))
+    left[0, 0] = 1.0
+    for k in range(1, order):
+        jet = np.polynomial.legendre.legval(-1.0, np.polynomial.legendre.legder(np.eye(degree + 1), m=k, axis=0))
+        t = (jet * (2 / width) ** k)[1:] @ inverse
+        left[k] = np.r_[-np.sum(t), t]
+        left[k, 0] -= np.sum(left[k])            # constants exactly in the kernel
+    return _assemble(left, len(x))
+
+
 def chebyshev_jets(x, order, points, modes, alpha=1e-12, penalty_power=4):
     """Regularized local Chebyshev jet estimator.
 

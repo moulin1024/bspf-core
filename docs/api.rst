@@ -57,3 +57,11 @@ Cardinal BSPF lines
 Tensor products
 ---------------
 .. automodule:: bspf_core.tensor
+
+Compatible spaces
+-----------------
+.. automodule:: bspf_core.compatible
+
+Hermite axes and bubbles
+------------------------
+.. automodule:: bspf_core.hermite

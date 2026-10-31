@@ -36,13 +36,30 @@ Not yet covered from these sources: pybspf noisy-data smoothing
 (`noise_std`), `antiderivative` with boundary values, and `with_regularization`
 as a traced function of `lam`.
 
+## Implemented in 0.1 (third batch: Navier-Stokes bases)
+
+| bspf-core | Replaces | Parity |
+| --- | --- | --- |
+| `jets.polynomial_jets` | hand-off `build_stencil("fixed{m}d{d}")` | yes, to 1e-14 relative |
+| `cardinal_line(..., symmetrize=True)` | hand-off reflection balancing `(P + P[::-1, ::-1]) / 2` | via the compatible-space test |
+| `cardinal.RemainderFactors`, `primitive_matrix` | hand-off `quad_basis.c` / `QuadFactors` (libquadmath; fixed degree 7, ten functions, knots at thirds) | via the compatible-space test; 34 vs 50 digits agree to 1e-14 |
+| `compatible.compatible_space(...).values` | `line_space.CompatibleLine.basis` (`"t"` orders 0-2, `"i"` orders 0-1) | yes, to 1e-13 relative (N = 17, 49, 129) |
+| `hermite.BubbleBasis` | `ns_exponential_enrichment.Axis` without dictionary | via the Hermite test |
+| `hermite.HermiteAxis` | backward-step `TraceAxis` (and the base of NACA `Basis`) | yes, same functions to 1e-13 relative |
+
+Not carried over from `CompatibleLine`: circulant-plus-low-rank mass and
+stiffness operators, the pressure space and dealiased uniform
+reconstruction; the block solvers do not use them. Wall exponential
+enrichment (`Axis` with a dictionary, NACA radial enrichment) is not in the
+core yet.
+
 ## Planned
 
 | Next component | Candidates to consolidate (from the pybspf survey) |
 | --- | --- |
 | Switch remaining cardinal callers to `bspf_core.cardinal` | `_qr_trial.qr_spline_fit`, `_numerics.trial_spaces._line_projector`, `_numerics._weak_basis` (MPFR), `_numerics._gpu_basis`, four scratch `Axis` copies |
-| Clamped / derivative-closed spaces (I' = T) | `pybspf.trial_spaces.ClosedBSPFLine`, `_numerics.trial_spaces._stream_line`, hand-off `CompatibleLine`, `OpenCompatibleLine` |
-| Hermite trace axis with clamped bubbles | backward-step `TraceAxis`, NACA `Basis` |
+| Remaining derivative-closed spaces (I' = T) | `pybspf.trial_spaces.ClosedBSPFLine`, `_numerics.trial_spaces._stream_line`, hand-off `OpenCompatibleLine` |
+| Enriched Hermite axes | NACA `Basis` (reflection, radial exponential enrichment), `ns_exponential_enrichment.Axis` dictionary |
 | Independent hybrid variants still outside | `bspf_models.fluids._embedded.stable_line.StableLine` (and its scratch twin), `free_bspf.FreeLine`, `stable_hybrid.StableAxis` |
 | Switch fast-diagonalization callers | reimplementations in `elliptic.pressure`, `pressure3d`, `weak_navier_stokes`, `smooth_extension`; hand-off `TensorMass` |
 | Circulant + low-rank solves | `pybspf.fast_axis`, hand-off `StructuredMass` |

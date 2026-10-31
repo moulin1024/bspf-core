@@ -29,6 +29,8 @@ one of three coordinate systems:
 | `jets` | endpoint-jet estimators as $2q \times N$ matrices | host |
 | `cardinal` | cardinal BSPF line: constrained spline fit + FFT remainder | host setup, JAX apply |
 | `tensor` | tensor-product evaluation/adjoint, fast diagonalization | NumPy or JAX |
+| `compatible` | zero-trace spaces `T` and primitives `I` ($I' = T$) | host |
+| `hermite` | streamfunction bubbles, value/slope Hermite axes | host |
 
 Setup is done once on the host; repeated work runs in compiled JAX with
 64-bit floats.
@@ -53,4 +55,17 @@ The fit is computed by the row-scaled null-space QR method rather than a KKT
 solve. The fit map has a large gain (about $10^8$ for degree 8 at $N=129$)
 and a KKT solve loses accuracy there; see {func}`bspf_core.cardinal.cardinal_line`.
 
-Smooth B-spline spaces with derivative closure are still planned; see {doc}`migration`.
+## Navier-Stokes bases and extended precision
+
+The streamfunction solvers use the closed cardinal line through
+{mod}`bspf_core.compatible` (the `T`/`I` pair) and {mod}`bspf_core.hermite`
+(bubbles with zero end value and slope, plus cubic Hermite end functions).
+Their lines constrain five endpoint orders, and the fit gain grows like
+$N^4$ ($5 \times 10^7$ at $N = 129$). Values between grid points are
+$\operatorname{trig}(f) + G P f$ with $G = B - \operatorname{trig}(B)$ small,
+so $G$ must be accurate relative to its own size: in float64 the second
+derivative loses six digits at $N = 129$.
+{class}`~bspf_core.cardinal.RemainderFactors` computes $G$ with `mpmath`
+at binary128 precision and rounds once, reproducing the hand-off
+quad-precision C factors to about $10^{-14}$. It is setup-only work: about
+0.25 s for a 17-sample axis and 1 s for 49 samples.

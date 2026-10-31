@@ -48,6 +48,15 @@ A second, independent group implements the cardinal (sampled) BSPF line:
 ``bspf_core.tensor``
     Tensor-product evaluation and adjoints, and fast diagonalization.
 
+The Navier-Stokes streamfunction bases build on the cardinal line:
+
+``bspf_core.compatible``
+    :class:`~bspf_core.compatible.CompatibleSpace`: zero-trace functions and
+    their primitives (``I' = T``), with extended-precision remainder factors.
+``bspf_core.hermite``
+    Streamfunction bubbles and :class:`~bspf_core.hermite.HermiteAxis`
+    (end values and slopes plus bubbles).
+
 Setup (basis construction, eigendecompositions) runs on the host with
 NumPy/SciPy. Repeated online work (parameter sweeps, batched solves) runs in
 JAX and requires 64-bit mode::
@@ -63,8 +72,11 @@ from .gram import ElementRule, element_rule, gram, sturm_liouville_matrices
 from .condensation import PoleCondensation, StaticCondensation
 from .cardinal import CardinalLine, cardinal_line
 from .tensor import FastDiagonalization
+from .compatible import CompatibleSpace, compatible_space
+from .hermite import BubbleBasis, HermiteAxis
 
 __version__ = "0.1.0.dev0"
-__all__ = ["Axis", "CardinalLine", "ElementRule", "FastDiagonalization", "PoleCondensation", "StaticCondensation",
-           "axis_from_family", "cardinal_line", "composite_gauss", "element_rule", "gauss_legendre", "gram",
-           "hybrid_axis", "sem_axis", "sturm_liouville_matrices"]
+__all__ = ["Axis", "BubbleBasis", "CardinalLine", "CompatibleSpace", "ElementRule", "FastDiagonalization",
+           "HermiteAxis", "PoleCondensation", "StaticCondensation", "axis_from_family", "cardinal_line",
+           "compatible_space", "composite_gauss", "element_rule", "gauss_legendre", "gram", "hybrid_axis", "sem_axis",
+           "sturm_liouville_matrices"]
