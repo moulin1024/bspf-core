@@ -1,5 +1,6 @@
 """Shared test configuration: 64-bit JAX and paths to reference implementations."""
 from pathlib import Path
+import importlib
 import importlib.util
 
 import jax
@@ -19,3 +20,23 @@ def load_reference(relative, name):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def import_from(directory, name):
+    """Import a module that lives in (and imports siblings from) a directory, or skip.
+
+    ``directory`` is absolute or relative to the hand-off repository. The
+    directory is put on ``sys.path`` because the reference code imports its
+    siblings by bare name.
+    """
+    import sys
+    path = Path(directory)
+    path = path if path.is_absolute() else HANDOFF / path
+    if not path.is_dir():
+        pytest.skip(f"reference implementation not available: {directory}")
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+    return importlib.import_module(name)
+
+
+PYBSPF = HANDOFF.parent / "pybspf" / "src"

@@ -30,9 +30,9 @@ class Axis:
 
     Parameters
     ----------
-    coefficients : ndarray, shape (terms, size)
-        Chebyshev coefficients (variable ``t = 2x - 1``) of the basis
-        functions, one per column.
+    coefficients : ndarray, shape (terms, n)
+        Chebyshev coefficients (variable ``t = 2x - 1``) of the ``n`` basis
+        functions (``n`` is :attr:`size`), one per column.
     coordinates : str
         ``"trace"``, ``"nodal"`` or ``"orthonormal"`` (see
         :mod:`bspf_core.coordinates`).
@@ -117,7 +117,7 @@ def axis_from_family(raw, coordinates="trace", nodes=None, **metadata):
 
     Parameters
     ----------
-    raw : ndarray, shape (terms, size)
+    raw : ndarray, shape (terms, n)
         Raw family from :mod:`bspf_core.families` (possibly several families
         concatenated column-wise).
     coordinates : {"trace", "nodal", "orthonormal"}, optional

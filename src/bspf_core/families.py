@@ -142,7 +142,8 @@ def polynomial_family(size, terms=None):
 
     Returns
     -------
-    ndarray, shape (terms, size)
+    ndarray
+        Shape ``(terms, size)``: Chebyshev coefficients, one column per function.
     """
     terms = default_terms(size) if terms is None else int(terms)
     return polynomial_block(int(size) - 1, terms)

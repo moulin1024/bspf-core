@@ -25,13 +25,32 @@ one of three coordinate systems:
 | `condensation` | pole-form and multi-block static condensation | host setup |
 | `tridiagonal` | batched pivoted tridiagonal solves | JAX |
 | `parametric` | chains of condensed elements for parameter sweeps | JAX |
+| `splines` | clamped knots, B-spline basis and primitive matrices (SciPy) | host |
+| `jets` | endpoint-jet estimators as $2q \times N$ matrices | host |
+| `cardinal` | cardinal BSPF line: constrained spline fit + FFT remainder | host setup, JAX apply |
+| `tensor` | tensor-product evaluation/adjoint, fast diagonalization | NumPy or JAX |
 
 Setup is done once on the host; repeated work runs in compiled JAX with
 64-bit floats.
 
 ## Which BSPF?
 
-This release implements the *independent hybrid* BSPF element
-($P_p$ plus independent Fourier pairs). The *cardinal* construction of pybspf
-(a B-spline fitted to endpoint jets plus an FFT remainder) and smooth
-B-spline spaces are planned; see {doc}`migration`.
+Two constructions share the name, and both are here:
+
+*Independent hybrid element* (`axis`, `gram`, `condensation`)
+: $P_p$ plus independent Fourier pairs on each element, used as a Galerkin
+  basis. This is what the SCOOTER reimplementation uses.
+
+*Cardinal line* (`cardinal`)
+: samples on a uniform grid; a clamped B-spline fitted to estimated endpoint
+  jets absorbs the non-periodic part and the FFT handles the smooth remainder.
+  This is the pybspf construction and the derivative operator of the
+  hand-off Navier-Stokes solvers. It supports two Fourier conventions:
+  `"samples"` (pybspf, period $N h$) and `"closed"` (hand-off, period
+  $(N-1) h$).
+
+The fit is computed by the row-scaled null-space QR method rather than a KKT
+solve. The fit map has a large gain (about $10^8$ for degree 8 at $N=129$)
+and a KKT solve loses accuracy there; see {func}`bspf_core.cardinal.cardinal_line`.
+
+Smooth B-spline spaces with derivative closure are still planned; see {doc}`migration`.

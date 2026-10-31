@@ -10,6 +10,10 @@ JAX (repeated work). Development version 0.1.0.dev0.
 - Solvers: pole-form condensation for parameter sweeps, multi-block static condensation, batched
   pivoted tridiagonal solves, chains of condensed elements (`bspf_core.condensation`,
   `bspf_core.tridiagonal`, `bspf_core.parametric`).
+- Cardinal BSPF lines: a clamped B-spline fitted to estimated endpoint jets plus an FFT remainder;
+  derivatives, interpolation and integration of sampled data, in the pybspf and hand-off Fourier
+  conventions (`bspf_core.splines`, `bspf_core.jets`, `bspf_core.cardinal`).
+- Tensor products: evaluation, Galerkin adjoints and fast diagonalization (`bspf_core.tensor`).
 
 Each component reproduces the implementation it replaces to rounding; see `docs/migration.md`.
 
@@ -22,4 +26,5 @@ sphinx-build -b html docs docs/_build/html      # documentation from docstrings
 
 License: GPL-3.0 (see `LICENSE`).
 
-Parity tests compare against implementations in the BSPF hand-off workspace and are skipped when it is not present.
+Parity tests compare against implementations in the BSPF hand-off workspace and in pybspf (a sibling
+checkout) and are skipped when those are not present.

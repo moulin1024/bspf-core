@@ -47,14 +47,14 @@ def orthonormalize(raw, passes=3):
 
     Parameters
     ----------
-    raw : ndarray, shape (terms, size)
+    raw : ndarray, shape (terms, n)
         Chebyshev coefficients of a linearly independent family.
     passes : int, optional
         Number of QR passes, ``>= 1``. Default 3, as in all existing axes.
 
     Returns
     -------
-    coefficients : ndarray, shape (terms, size)
+    coefficients : ndarray, shape (terms, n)
         Orthonormal basis of the same span.
     raw_condition : float
         2-norm condition number of the first triangular factor; a measure of
@@ -82,7 +82,7 @@ def trace_coordinates(orthonormal, tolerance=2e-11):
 
     Parameters
     ----------
-    orthonormal : ndarray, shape (terms, size)
+    orthonormal : ndarray, shape (terms, n)
         Orthonormal coefficients from :func:`orthonormalize`; the span must
         contain the affine functions.
     tolerance : float, optional
@@ -91,7 +91,7 @@ def trace_coordinates(orthonormal, tolerance=2e-11):
 
     Returns
     -------
-    coefficients : ndarray, shape (terms, size)
+    coefficients : ndarray, shape (terms, n)
         Columns ``[1 - x, interior_1, ..., interior_{n-2}, x]``.
     trace_defect : float
         Largest deviation of the endpoint values from the exact pattern.
@@ -123,9 +123,9 @@ def nodal_coordinates(orthonormal, nodes, tolerance=1e-10, tail_tolerance=1e-14)
 
     Parameters
     ----------
-    orthonormal : ndarray, shape (terms, size)
+    orthonormal : ndarray, shape (terms, n)
         Orthonormal coefficients from :func:`orthonormalize`.
-    nodes : array_like, shape (size,)
+    nodes : array_like, shape (n,)
         Distinct nodes in [0, 1], unisolvent for the span.
     tolerance : float, optional
         Maximum accepted deviation from the identity at the nodes.
@@ -135,7 +135,7 @@ def nodal_coordinates(orthonormal, nodes, tolerance=1e-10, tail_tolerance=1e-14)
 
     Returns
     -------
-    coefficients : ndarray, shape (terms, size)
+    coefficients : ndarray, shape (terms, n)
     nodal_condition : float
         Condition number of the matrix of orthonormal values at the nodes.
     cardinal_defect : float
@@ -167,8 +167,8 @@ def lobatto_nodes(size):
 
     Returns
     -------
-    ndarray, shape (size,)
-        Increasing nodes, including 0 and 1.
+    ndarray
+        Shape ``(size,)``: increasing nodes, including 0 and 1.
     """
     inner = np.polynomial.legendre.Legendre.basis(int(size) - 1).deriv().roots()
     return np.r_[0.0, (inner + 1) / 2, 1.0]

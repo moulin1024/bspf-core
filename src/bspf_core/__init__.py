@@ -36,6 +36,18 @@ in this list:
     A chain of condensed elements solved for many values of a parameter,
     the engine behind wavenumber integration.
 
+A second, independent group implements the cardinal (sampled) BSPF line:
+
+``bspf_core.splines``
+    Clamped knot vectors and B-spline basis matrices (via SciPy).
+``bspf_core.jets``
+    Endpoint-jet estimators as linear maps from samples.
+``bspf_core.cardinal``
+    :class:`~bspf_core.cardinal.CardinalLine`: endpoint-constrained spline
+    fit plus FFT remainder; derivatives, evaluation and integration.
+``bspf_core.tensor``
+    Tensor-product evaluation and adjoints, and fast diagonalization.
+
 Setup (basis construction, eigendecompositions) runs on the host with
 NumPy/SciPy. Repeated online work (parameter sweeps, batched solves) runs in
 JAX and requires 64-bit mode::
@@ -49,7 +61,10 @@ from .quadrature import gauss_legendre, composite_gauss
 from .axis import Axis, hybrid_axis, sem_axis, axis_from_family
 from .gram import ElementRule, element_rule, gram, sturm_liouville_matrices
 from .condensation import PoleCondensation, StaticCondensation
+from .cardinal import CardinalLine, cardinal_line
+from .tensor import FastDiagonalization
 
 __version__ = "0.1.0.dev0"
-__all__ = ["Axis", "ElementRule", "PoleCondensation", "StaticCondensation", "axis_from_family", "composite_gauss",
-           "element_rule", "gauss_legendre", "gram", "hybrid_axis", "sem_axis", "sturm_liouville_matrices"]
+__all__ = ["Axis", "CardinalLine", "ElementRule", "FastDiagonalization", "PoleCondensation", "StaticCondensation",
+           "axis_from_family", "cardinal_line", "composite_gauss", "element_rule", "gauss_legendre", "gram",
+           "hybrid_axis", "sem_axis", "sturm_liouville_matrices"]

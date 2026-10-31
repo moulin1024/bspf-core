@@ -41,3 +41,19 @@ Tridiagonal solves
 Parametric chains
 -----------------
 .. automodule:: bspf_core.parametric
+
+Clamped B-splines
+-----------------
+.. automodule:: bspf_core.splines
+
+Endpoint jets
+-------------
+.. automodule:: bspf_core.jets
+
+Cardinal BSPF lines
+-------------------
+.. automodule:: bspf_core.cardinal
+
+Tensor products
+---------------
+.. automodule:: bspf_core.tensor
