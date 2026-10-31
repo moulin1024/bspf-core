@@ -470,26 +470,30 @@ class RemainderFactors:
     """Spline interpolation errors ``G = B - trig(B)`` in extended precision.
 
     Setup computes the Fourier coefficients of the sampled spline basis with
-    ``mpmath`` at ``digits`` significant digits; :meth:`evaluate` forms ``G``,
-    its derivatives or its primitive at points and rounds the result to
-    float64 once. Pass the object as ``factors=`` to :func:`evaluation_matrix`,
-    :func:`primitive_matrix` and :func:`integration_weights`.
+    ``gmpy2`` (MPFR/MPC) at ``digits`` significant digits; :meth:`evaluate`
+    forms ``G``, its derivatives or its primitive at points and rounds the
+    result to float64 once. Pass the object as ``factors=`` to
+    :func:`evaluation_matrix`, :func:`primitive_matrix` and
+    :func:`integration_weights`.
 
     Parameters
     ----------
     line : CardinalLine
     digits : int, optional
-        Working precision in decimal digits. The default 34 matches IEEE
+        Working precision in decimal digits. The default 34 is 113 bits, IEEE
         binary128 (``__float128``), the precision of the hand-off factors.
 
     Notes
     -----
     Replaces the hand-off ``quad_basis.c``/``QuadFactors`` (GCC
     ``libquadmath``), which is fixed to degree 7, ten spline functions and
-    knots at thirds. This version takes any clamped knots, degree and grid,
-    at the cost of pure-Python arithmetic: setup is ``O(count^2 n_basis)`` and
-    each point ``O(count n_basis)`` multiprecision operations. Results are
-    cached per point set.
+    knots at thirds; this version takes any clamped knots, degree and grid.
+    Setup is ``O(count^2 n_basis)`` and each point ``O(count n_basis)``
+    multiprecision operations, each a compiled MPFR call driven from Python.
+    One pass over the modes gives ``G`` and its derivatives up to order 2
+    (or the requested order) and its primitive; results are cached per
+    point set. The arithmetic runs inside a local ``gmpy2`` context, so the
+    global context is never changed.
 
     Examples
     --------
@@ -503,23 +507,29 @@ class RemainderFactors:
     """
 
     def __init__(self, line, digits=34):
-        import mpmath
-        self._mp = mpmath.mp.clone()
-        self._mp.dps = int(digits)
-        mp = self._mp
+        import gmpy2
+        self._gmpy2 = gmpy2
         self.line = line
         self.digits = int(digits)
+        self._context = gmpy2.context(precision=int(np.ceil(self.digits * np.log2(10))))
         x = np.asarray(line.x)
-        self._count = len(line.omega)
-        self._x0 = mp.mpf(float(x[0]))
-        self._h = (mp.mpf(float(x[-1])) - self._x0) / (line.size - 1)
-        self._period = self._count * self._h
-        self._knots = [mp.mpf(float(t)) for t in np.asarray(line.knots)]
-        count, nb = self._count, line.n_basis
-        samples = [splines._mp_basis(mp, self._knots, line.degree, self._x0 + n * self._h) for n in range(count)]
-        roots = [mp.expjpi(-mp.mpf(2 * j) / count) for j in range(count)]
-        self._coefficients = [[sum(samples[n][m] * roots[(k * n) % count] for n in range(count)) / count
-                               for m in range(nb)] for k in range(count // 2 + 1)]
+        count, nb = len(line.omega), line.n_basis
+        self._count = count
+        with self._context:
+            mpfr = gmpy2.mpfr
+            self._x0 = mpfr(float(x[0]))
+            self._h = (mpfr(float(x[-1])) - self._x0) / (line.size - 1)
+            self._step = 2 * gmpy2.const_pi() / (count * self._h)       # fundamental angular frequency
+            self._knots = [mpfr(float(t)) for t in np.asarray(line.knots)]
+            samples = [splines._mp_basis(self._knots, line.degree, self._x0 + n * self._h) for n in range(count)]
+            roots = []
+            for j in range(count):
+                sin, cos = gmpy2.sin_cos(-2 * gmpy2.const_pi() * j / count)
+                roots.append(gmpy2.mpc(cos, sin))
+            self._coefficients = [[sum((samples[n][m] * roots[(k * n) % count] for n in range(count)), gmpy2.mpc(0))
+                                   / count for m in range(nb)] for k in range(count // 2 + 1)]
+            if count % 2 == 0:                                            # Nyquist: real part only
+                self._coefficients[-1] = [gmpy2.mpc(c.real, 0) for c in self._coefficients[-1]]
         self._cache = {}
 
     def evaluate(self, points, derivative=0, primitive=False):
@@ -540,36 +550,35 @@ class RemainderFactors:
         key = points.tobytes()
         orders = max(2, int(derivative))
         if key not in self._cache or len(self._cache[key]) - 1 < orders + 1:
-            rows = [self._point(float(z), orders) for z in points]
+            with self._context:
+                rows = [self._point(float(z), orders) for z in points]
             self._cache[key] = [np.array([r[j] for r in rows]) for j in range(orders + 2)]
         bundle = self._cache[key]
         return bundle[-1] if primitive else bundle[int(derivative)]
 
     def _point(self, z, orders):
         """``[G, G', ..., G^(orders), int G]`` at one point, from one pass over the modes."""
-        mp = self._mp
+        gmpy2 = self._gmpy2
         count, K = self._count, self._count // 2
-        u = mp.mpf(z) - self._x0
+        u = gmpy2.mpfr(z) - self._x0
         x = self._x0 + u
         degree = self.line.degree
-        splines_ = [splines._mp_basis(mp, self._knots, degree, x, d) for d in range(orders + 1)]
-        splines_.append(splines._mp_basis(mp, self._knots, degree, x, primitive=True))
+        spline = [splines._mp_basis(self._knots, degree, x, d) for d in range(orders + 1)]
+        spline.append(splines._mp_basis(self._knots, degree, x, primitive=True))
         c0 = [c.real for c in self._coefficients[0]]
-        trig = [list(c0)] + [[mp.zero] * len(c0) for _ in range(orders)] + [[c * u for c in c0]]
-        step = 2 * mp.pi / self._period
-        rotation = mp.expj(step * u)
-        phase = mp.one
+        trig = [list(c0)] + [[0 * u] * len(c0) for _ in range(orders)] + [[c * u for c in c0]]
+        sin, cos = gmpy2.sin_cos(self._step * u)
+        rotation = gmpy2.mpc(cos, sin)
+        phase = gmpy2.mpc(1)
         for k in range(1, K + 1):
-            omega = step * k
-            phase *= rotation                                         # e^{i k step u}; 34 digits absorb the drift
-            nyquist = count % 2 == 0 and k == K                       # real part, counted once
-            weight = 1 if nyquist else 2
+            omega = self._step * k
+            phase *= rotation                                         # e^{i omega u}; the guard digits absorb the drift
+            weight = 1 if (count % 2 == 0 and k == K) else 2          # Nyquist counted once
             powers = [weight * omega ** d for d in range(orders + 1)]
             for m, c in enumerate(self._coefficients[k]):
-                c = mp.mpc(c.real, 0) if nyquist else c
                 cp = c * phase
                 parts = (cp.real, -cp.imag, -cp.real, cp.imag)        # Re(cp * i^d), d mod 4
                 for d in range(orders + 1):
                     trig[d][m] += powers[d] * parts[d % 4]
                 trig[-1][m] += weight * (cp.imag - c.imag) / omega    # Re(c (e^{i omega u} - 1) / (i omega))
-        return [[float(a - b) for a, b in zip(sp, tr)] for sp, tr in zip(splines_, trig)]
+        return [[float(a - b) for a, b in zip(sp, tr)] for sp, tr in zip(spline, trig)]

@@ -65,7 +65,8 @@ $N^4$ ($5 \times 10^7$ at $N = 129$). Values between grid points are
 $\operatorname{trig}(f) + G P f$ with $G = B - \operatorname{trig}(B)$ small,
 so $G$ must be accurate relative to its own size: in float64 the second
 derivative loses six digits at $N = 129$.
-{class}`~bspf_core.cardinal.RemainderFactors` computes $G$ with `mpmath`
+{class}`~bspf_core.cardinal.RemainderFactors` computes $G$ with `gmpy2` (MPFR)
 at binary128 precision and rounds once, reproducing the hand-off
-quad-precision C factors to about $10^{-14}$. It is setup-only work: about
-0.25 s for a 17-sample axis and 1 s for 49 samples.
+quad-precision C factors to about $10^{-14}$. It is setup-only work: a
+{class}`~bspf_core.hermite.HermiteAxis` takes about 0.04 s for 17 samples
+and 0.13 s for 49 (hand-off C version: 0.02 s and 0.05 s).

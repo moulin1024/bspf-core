@@ -15,7 +15,7 @@ JAX (repeated work). Development version 0.1.0.dev0.
   conventions (`bspf_core.splines`, `bspf_core.jets`, `bspf_core.cardinal`).
 - Tensor products: evaluation, Galerkin adjoints and fast diagonalization (`bspf_core.tensor`).
 - Navier-Stokes streamfunction bases: derivative-compatible zero-trace spaces and Hermite
-  value/slope axes with bubbles, using extended-precision (mpmath) remainder factors
+  value/slope axes with bubbles, using extended-precision (gmpy2/MPFR) remainder factors
   (`bspf_core.compatible`, `bspf_core.hermite`).
 
 Each component reproduces the implementation it replaces to rounding; see `docs/migration.md`.

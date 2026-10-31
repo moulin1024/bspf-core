@@ -108,27 +108,31 @@ def primitive_matrix(knots, degree, x):
     return BSpline(t, np.eye(n_basis), degree).antiderivative()(np.atleast_1d(x))
 
 
-def _mp_basis(mp, t, degree, x, derivative=0, primitive=False):
-    """All basis values (a derivative, or primitives from ``t[0]``) at one point, in ``mpmath``.
+def _mp_basis(t, degree, x, derivative=0, primitive=False):
+    """All basis values (a derivative, or primitives from ``t[0]``) at one point, exactly typed.
 
-    ``t`` is a list of ``mp.mpf`` knots and ``x`` an ``mp.mpf`` point. Cox-de
-    Boor recursion on the knot span of ``x``; at the right end the last
-    non-empty span is used, which gives the left-hand limit exactly. Used by
+    ``t`` is a list of knots and ``x`` a point of one number type (``gmpy2.mpfr``
+    in practice, but any field type works, e.g. :class:`fractions.Fraction`);
+    the arithmetic stays in that type. Cox-de Boor recursion on the knot span
+    of ``x``; at the right end the last non-empty span is used, which gives
+    the left-hand limit exactly. Used by
     :class:`bspf_core.cardinal.RemainderFactors`.
     """
+    zero = x - x
+    one = zero + 1
     if primitive:
         # int_{t_0}^x B_{j,p} = (t_{j+p+1} - t_j)/(p+1) * sum_{i>j} B_{i,p+1}(x) on [t_0] + t + [t_end]
-        values = _mp_basis(mp, [t[0]] + list(t) + [t[-1]], degree + 1, x)
-        return [(t[j + degree + 1] - t[j]) / (degree + 1) * mp.fsum(values[j + 1:])
+        values = _mp_basis([t[0]] + list(t) + [t[-1]], degree + 1, x)
+        return [(t[j + degree + 1] - t[j]) / (degree + 1) * sum(values[j + 1:], zero)
                 for j in range(len(t) - degree - 1)]
     spans = [i for i in range(len(t) - 1) if t[i] < t[i + 1]]
     span = next((i for i in spans if t[i] <= x < t[i + 1]), spans[-1])
-    levels = [[mp.one if i == span else mp.zero for i in range(len(t) - 1)]]
+    levels = [[one if i == span else zero for i in range(len(t) - 1)]]
     for q in range(1, degree + 1):
         low = levels[-1]
         level = []
         for i in range(len(t) - q - 1):
-            value = mp.zero
+            value = zero
             if t[i + q] != t[i]:
                 value += (x - t[i]) / (t[i + q] - t[i]) * low[i]
             if t[i + q + 1] != t[i + 1]:
@@ -142,7 +146,7 @@ def _mp_basis(mp, t, degree, x, derivative=0, primitive=False):
         low = differentiate(q - 1, r - 1)
         out = []
         for i in range(len(t) - q - 1):
-            value = mp.zero
+            value = zero
             if t[i + q] != t[i]:
                 value += q / (t[i + q] - t[i]) * low[i]
             if t[i + q + 1] != t[i + 1]:
@@ -151,5 +155,5 @@ def _mp_basis(mp, t, degree, x, derivative=0, primitive=False):
         return out
 
     if derivative > degree:
-        return [mp.zero] * (len(t) - degree - 1)
+        return [zero] * (len(t) - degree - 1)
     return differentiate(degree, derivative)
